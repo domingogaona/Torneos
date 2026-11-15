@@ -115,9 +115,6 @@
                     <div style="display:flex; gap:8px; margin-top:6px;"><select id="editGoalPlayerSelect"></select><button class="btn-primary btn-sm" onclick="addTempGoal()">+ Gol</button></div>
                     <div id="editScorersChips" style="margin-top:8px;"></div>
 <script>
-    window.onerror = function(msg, url, line) {
-    document.getElementById('loadingIndicator').innerHTML = '<div style="color:red; background:#fee2e2; padding:12px; border-radius:8px;"><b>Error en línea ' + line + ':</b> ' + msg + '</div>';
-};
 
     // PEGA TUS DATOS DE SUPABASE AQUI ABAJO:
     const SUPABASE_URL = 'https://tlbycetjrvtwpgwaxzap.supabase.co/rest/v1/';
