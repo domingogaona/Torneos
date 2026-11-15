@@ -120,7 +120,8 @@
     const SUPABASE_URL = 'https://tlbycetjrvtwpgwaxzap.supabase.co/rest/v1/';
     const SUPABASE_KEY = 'sb_publishable_6-QkVocf1X4-3z5ilE8gvQ_qmUNym1T';
 
-    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
     let state = { orgs: [], tournaments: [], teams: [], players: [], matches: [], events: [], selectedOrg: null, selectedTour: null, isAdminView: false, user: null, editingMatchId: null, tempGoals: [] };
 
     async function init() {
