@@ -117,8 +117,7 @@
 <script>
     // PEGA TUS DATOS DE SUPABASE AQUI ABAJO:
     const SUPABASE_URL = 'https://tlbycetjrvtwpgwaxzap.supabase.co/rest/v1/';
-    const SUPABASE_KEY = 'sb_publishable_6-QkVocf1X4-3z5ilE8gvQ_qmUNym1T
-';
+    const SUPABASE_KEY = 'sb_publishable_6-QkVocf1X4-3z5ilE8gvQ_qmUNym1T';
 
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     let state = { orgs: [], tournaments: [], teams: [], players: [], matches: [], events: [], selectedOrg: null, selectedTour: null, isAdminView: false, user: null, editingMatchId: null, tempGoals: [] };
@@ -242,5 +241,85 @@
         document.getElementById('newTourName').value = ''; await onOrgChange(); alert('Torneo creado.');
     }
 
-    function downloadTemplate(type) {
+        function downloadTemplate(type) {
+        const rows = type === 'buena_fe' ? [{ equipo: 'Los Leones FC', dorsal: 10, nombre_jugador: 'Mateo Gomez', cedula: '5123456' }] : [{ fecha_nro: 1, equipo_local: 'Los Leones FC', equipo_visitante: 'Estrellas del Sur', horario_cancha: 'Sab 09:00 - Cancha 1' }];
+        const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+        XLSX.writeFile(wb, type === 'buena_fe' ? 'plantilla_buena_fe.xlsx' : 'plantilla_fixture.xlsx');
+    }
+
+    function readExcelFile(file, callback) {
+        const reader = new FileReader();
+        reader.onload = (e) => { const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' }); callback(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])); };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function importBuenaFe(event) {
+        const file = event.target.files[0]; if (!file || !state.selectedTour) return alert('Selecciona un torneo arriba primero.');
+        readExcelFile(file, async (rows) => {
+            const teamNames = [...new Set(rows.map(r => String(r.equipo || '').trim()).filter(Boolean))];
+            for (const tName of teamNames) {
+                if (!state.teams.find(t => t.name.toLowerCase() === tName.toLowerCase())) {
+                    const { data } = await db.from('teams').insert([{ tournament_id: state.selectedTour, name: tName }]).select().single();
+                    if (data) state.teams.push(data);
+                }
+            }
+            const playersToInsert = rows.map(r => {
+                const team = state.teams.find(t => t.name.toLowerCase() === String(r.equipo || '').trim().toLowerCase());
+                return (team && r.nombre_jugador) ? { team_id: team.id, full_name: String(r.nombre_jugador).trim(), jersey_number: parseInt(r.dorsal) || null, document_id: r.cedula ? String(r.cedula) : null } : null;
+            }).filter(Boolean);
+            if (playersToInsert.length) { const { error } = await db.from('players').insert(playersToInsert); if (error) return alert(error.message); }
+            event.target.value = ''; await onTourChange(); alert(`¡Listo! ${teamNames.length} equipos y ${playersToInsert.length} jugadores importados.`);
+        });
+    }
+
+    function importFixture(event) {
+        const file = event.target.files[0]; if (!file || !state.selectedTour) return alert('Selecciona un torneo arriba primero.');
+        readExcelFile(file, async (rows) => {
+            const matchesToInsert = rows.map(r => {
+                const home = state.teams.find(t => t.name.toLowerCase() === String(r.equipo_local || '').trim().toLowerCase());
+                const away = state.teams.find(t => t.name.toLowerCase() === String(r.equipo_visitante || '').trim().toLowerCase());
+                return (home && away) ? { tournament_id: state.selectedTour, matchday: parseInt(r.fecha_nro) || 1, home_team_id: home.id, away_team_id: away.id, match_date: String(r.horario_cancha || '') } : null;
+            }).filter(Boolean);
+            if (!matchesToInsert.length) return alert('No coinciden los nombres de equipos.');
+            const { error } = await db.from('matches').insert(matchesToInsert); if (error) return alert(error.message);
+            event.target.value = ''; await onTourChange(); alert(`¡Fixture cargado! ${matchesToInsert.length} partidos.`);
+        });
+    }
+
+    function openEditMatch(matchId) {
+        const m = state.matches.find(x => x.id === matchId); if (!m) return;
+        state.editingMatchId = matchId;
+        state.tempGoals = state.events.filter(e => e.match_id === matchId && e.event_type === 'goal').map(e => ({ player_id: e.player_id, team_id: e.team_id }));
+        const home = state.teams.find(t => t.id === m.home_team_id); const away = state.teams.find(t => t.id === m.away_team_id);
+        document.getElementById('editHomeLabel').innerText = home.name; document.getElementById('editAwayLabel').innerText = away.name;
+        document.getElementById('editHomeGoals').value = m.home_goals; document.getElementById('editAwayGoals').value = m.away_goals;
+        const matchPlayers = state.players.filter(p => p.team_id === m.home_team_id || p.team_id === m.away_team_id);
+        document.getElementById('editGoalPlayerSelect').innerHTML = matchPlayers.map(p => `<option value="${p.id}" data-team="${p.team_id}">[${p.team_id === m.home_team_id ? home.name : away.name}] #${p.jersey_number || '-'} ${p.full_name}</option>`).join('');
+        renderTempGoals(); document.getElementById('matchEditCard').classList.remove('hidden'); document.getElementById('matchEditCard').scrollIntoView({ behavior: 'smooth' });
+    }
+    function addTempGoal() {
+        const sel = document.getElementById('editGoalPlayerSelect'); if (!sel.value) return;
+        state.tempGoals.push({ player_id: sel.value, team_id: sel.options[sel.selectedIndex].getAttribute('data-team') }); renderTempGoals();
+    }
+    function removeTempGoal(idx) { state.tempGoals.splice(idx, 1); renderTempGoals(); }
+    function renderTempGoals() {
+        document.getElementById('editScorersChips').innerHTML = state.tempGoals.map((g, i) => {
+            const p = state.players.find(pl => pl.id === g.player_id);
+            return `<span class="pill">⚽ ${p ? p.full_name : ''} <b style="cursor:pointer;margin-left:4px;" onclick="removeTempGoal(${i})">×</b></span>`;
+        }).join('');
+    }
+    async function saveMatchResult() {
+        await db.from('matches').update({ home_goals: parseInt(document.getElementById('editHomeGoals').value) || 0, away_goals: parseInt(document.getElementById('editAwayGoals').value) || 0, is_played: true }).eq('id', state.editingMatchId);
+        await db.from('match_events').delete().eq('match_id', state.editingMatchId);
+        if (state.tempGoals.length) {
+            await db.from('match_events').insert(state.tempGoals.map(g => ({ match_id: state.editingMatchId, player_id: g.player_id, team_id: g.team_id, event_type: 'goal' })));
+        }
+        closeEditMatch(); await onTourChange(); alert('¡Resultado y goleadores publicados en vivo!');
+    }
+    function closeEditMatch() { document.getElementById('matchEditCard').classList.add('hidden'); state.editingMatchId = null; }
+    init();
+</script>
+</body>
+</html>
+
                 
